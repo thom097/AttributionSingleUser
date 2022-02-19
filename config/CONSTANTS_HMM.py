@@ -20,7 +20,7 @@ basis = 1e-7
 
 # Parameters to run HMM in test mode
 # TODO: check this to be consistent with the N_camp from simulator
-# N_camp = 1  #2
+N_camp = 1  #2
 
 discount_factor = 1
 p_exp = [0.6]  # , 0.5] # Probability of exposition to each campaign

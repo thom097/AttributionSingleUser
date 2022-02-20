@@ -1,7 +1,7 @@
 from src.plot_and_print_info.plots_and_print_info import *
 import numpy as np
-from config.CONSTANTS_HMM import *
-
+#from config.CONSTANTS_SIMULATOR import *
+from config.execution_parameters import *
 
 # Joint Exposition Function
 def joint_exposition_p(marginal_prob):
@@ -153,6 +153,7 @@ class SimulationClass:
         self.analysis_mode = analysis_mode
         self.user_list, self.campaigns_list = generate_empty_dictionaries()
         self.exposition_vector = build_exposition_vector()
+        self.results = {"user_expositions": np.empty([N_camp, time_failure, 0]), "user_outcome": np.empty([0, time_failure])}
 
         if analysis_mode:
             self.simulation = {"funnel_position_history": np.zeros((N_users, time)),
@@ -175,8 +176,8 @@ class SimulationClass:
 
             for ii in range(N_users):
                 elapsed_time = day - self.user_list[ii]["entering_time"]
-                if elapsed_time > time_failure:
-                    self.reset_user(ii, day)
+                if elapsed_time >= time_failure:
+                    self.reset_user(ii, day, has_converted=False)
 
                 if users_actions_flag == 1:
                     self.action_check(ii, day)
@@ -190,7 +191,7 @@ class SimulationClass:
                     usr = round(np.random.uniform(0, N_users - 1))
                     if self.campaigns_list[exposition]["prob_exposition"][self.user_list[usr]["target_group"]] >= \
                             np.random.uniform(0, 1):
-                        # metti un if campagna != awareness
+                        # TODO: metti un if campagna != awareness
                         delta_funnel_position = self.compute_delta_funnel_position(day, usr, exposition)
                         self.user_list[usr]["history"][(exposition, day)] += delta_funnel_position
 
@@ -210,10 +211,24 @@ class SimulationClass:
                     [self.compute_rescaled_funnel_position(day, temp_usr) for temp_usr in range(N_users)]
 
     # Reset a user and create a new one
-    def reset_user(self, usr, day):
+    def reset_user(self, usr, day, has_converted):
+        self.save_result(usr, day, has_converted)
         self.state["tot_users"] += 1
         self.user_list[usr] = generate_user("user_" + str(self.state["tot_users"]))
         self.user_list[usr]["entering_time"] = day
+
+    def save_result(self, usr, day, has_converted):
+        outcome = np.zeros([1, time_failure])
+        # TODO: check if you start on initial_time or (-1/+1) and the same for day
+        initial_time = self.user_list[usr]["entering_time"]
+        expositions = np.transpose(self.simulation["expositions"][initial_time:day, usr:1+usr, :], [2, 0, 1])
+
+        if has_converted:
+            outcome[0,day-initial_time:] = 1
+            expositions = np.append(expositions, np.zeros([N_camp, time_failure+initial_time-day, 1]), axis=1)
+
+        self.results["user_outcome"] = np.append(self.results["user_outcome"], outcome, axis=0)
+        self.results["user_expositions"] = np.append(self.results["user_expositions"], expositions, axis=2)
 
     # This function simulates possible actions of a user, in case this option is enabled (See users_actions_flag)
     # TODO: Check this function, now it doesn't work...
@@ -289,7 +304,7 @@ class SimulationClass:
 
         # user_list[usr]["conversion"]=1 # TODO: da sistemare viene resettato subito
         self.state["conversions"] += 1
-        self.reset_user(usr, day)
+        self.reset_user(usr, day, has_converted=True)
 
     # Plot results of the simulation
     def plot_results(self):

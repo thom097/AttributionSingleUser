@@ -7,13 +7,14 @@ N_users = 50  # Set users' pool dimension. Notice that the total number of users
 ########################################################################################################################
 
 # Parameters to run the simulator
+ANALYSIS_MODE = True
 # TODO: check no debug_mode or analysis_mode
 time_failure = 30  # Number of days after which we suppose a user is not interested
 # Campaign properties
 N_awn_camp = 3  # number of awareness campaigns
 N_traff_camp = 2  # number of traffic campaigns
 N_cnv_camp = 1  # number of conversion campaigns
-N_camp = 1  # TODO: attention, set this in a smarter way
+N_camp = 6
 #N_camp = N_awn_camp + N_traff_camp + N_cnv_camp  # number of campaigns
 alpha = 0.7 # Saturation level for awareness campaigns
 # Set number of expositions for each campaign

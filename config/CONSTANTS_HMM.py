@@ -1,10 +1,16 @@
 # ENVIRONMENT PARAMETERS
-time = 30  # Days
+time = execution_duration = 30  # Days
 lw = 2  # line width, for plots
 N_users = 10000  # Set users' pool dimension. Notice that the total number of users is dynamical
 
 ########################################################################################################################
 ########################################################################################################################
+
+# For HMM
+HMM_TEST_EXECUTION = True
+LR_EXPONENTIAL_DECAY = False
+# This variable helps understand if the fit works or not. If TRUE the HMM is not hidden!
+STATES_ARE_OBSERVABLE = True
 
 # PARAMETERS TO FIT THE HIDDEN MARKOV MODEL
 N_states = 3  # 4

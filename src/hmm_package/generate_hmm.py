@@ -1,4 +1,5 @@
-from config.CONSTANTS_HMM import *
+#from config.CONSTANTS_HMM import *
+from config.execution_parameters import *
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -12,9 +13,9 @@ def simulate_observations():
     exposition_vector = np.ones(N_exp_1) * 1
     # exposition_vector = np.append(exposition_vector, np.ones(N_exp_2)*2)
     exposition_vector = exposition_vector.astype(int)
-    observation = np.zeros([N_camp, time, N_users])
+    observation = np.zeros([N_camp, execution_duration, N_users])
 
-    for day in range(time):
+    for day in range(execution_duration):
         np.random.shuffle(exposition_vector)
         for exposition in exposition_vector:
             flag = 0
@@ -30,18 +31,19 @@ def simulate_observations():
 
 # Compute Adstock function given the observation
 def compute_adstock(observation):
-
+    # shape is [N_camp, execution_duration, N_users]
+    tot_users = observation.shape[2]
     adstock = np.zeros(observation.shape)
     adstock[:, 0, :] = observation[:, 0, :]
 
-    for ii in range(1, time):
+    for ii in range(1, execution_duration):
         updates = observation[:, ii, :]
         adstock[:, ii, :] = discount_factor * adstock[:, ii - 1, :] + observation[:, ii, :]
 
     adstock = tf.constant(adstock, dtype=tf.float32)
 
-    # NB MODIFY THIS CODE TO PUT THIS AT THE START
-    adstock = tf.concat([tf.zeros([N_camp, 1, N_users]), adstock], axis=1)
+    # TODO: NB MODIFY THIS CODE TO PUT THIS AT THE START
+    adstock = tf.concat([tf.zeros([N_camp, 1, tot_users]), adstock], axis=1)
 
     adstock = tf.transpose(adstock, perm=[2, 0, 1])
     return adstock
@@ -53,7 +55,7 @@ def compute_adstock(observation):
 # This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
 def make_transition_matrix(mu, beta, adstock, basis=1e-10):
     batch_shape = tf.shape(adstock)[0]
-    Q_final = tf.zeros([batch_shape, time, N_states, N_states])
+    Q_final = tf.zeros([batch_shape, execution_duration, N_states, N_states])
     for iterator in tf.range(batch_shape):
 
         # Reshape as square matrices
@@ -65,16 +67,16 @@ def make_transition_matrix(mu, beta, adstock, basis=1e-10):
         # Adstock = [users, campaigns, time]
         O_beta = tf.tensordot(adstock[iterator, :, 1:], beta_no_same_states,
                               [0, 0])  # ATTENZIONE ORA PRENDO SOLO UN ADSTOCK!!
-        mu_nosame_states = tf.repeat(mu_nosame_states, time, axis=0)
+        mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
 
         # Solve Matrix computation
         num = tf.exp(O_beta + mu_nosame_states)
         den_vec = 1 + tf.reduce_sum(num, 2)
-        den = tf.reshape(den_vec, [time, N_states - 1, 1])
+        den = tf.reshape(den_vec, [execution_duration, N_states - 1, 1])
         Q_div = num / den
 
         Q_same = 1 - tf.math.reduce_sum(Q_div, 2)
-        Q_temp = tf.zeros([time, N_states - 1, N_states], dtype=tf.float32)
+        Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
 
         Q_temp = tf.linalg.set_diag(Q_temp, Q_same)
         Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=0), k=1)
@@ -83,7 +85,7 @@ def make_transition_matrix(mu, beta, adstock, basis=1e-10):
             Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=-ii), k=-ii)
 
         # Attach the slice for last observable state
-        last_piece = np.ones([time, 1, N_states]) * basis
+        last_piece = np.ones([execution_duration, 1, N_states]) * basis
         last_piece[:, 0, -1] = 1 - (N_states - 1) * basis
 
         Q_iter = tf.concat([Q_temp, last_piece], axis=1)
@@ -169,7 +171,7 @@ class TransitionProbLayer(tf.keras.layers.Layer):
                                   trainable=True)
         self.beta = self.add_weight("beta", shape=[beta_dim],
                                     dtype='float32',
-                                    constraint=tf.keras.constraints.non_neg(),
+                                    #constraint=tf.keras.constraints.non_neg(),
                                     # initializer=tf.keras.initializers.Constant(beta),
                                     trainable=True)
 
@@ -184,7 +186,7 @@ class TransitionProbLayer(tf.keras.layers.Layer):
 def build_hmm_to_fit(states_observable):
     # Generate functional model
 
-    adstock_input = tf.keras.layers.Input(shape=(N_camp, time + 1,))
+    adstock_input = tf.keras.layers.Input(shape=(N_camp, execution_duration + 1,))
     Q = TransitionProbLayer(N_states)(adstock_input)
     out = tfp.layers.DistributionLambda(
         lambda t: tfd.HiddenMarkovModel(
@@ -192,7 +194,7 @@ def build_hmm_to_fit(states_observable):
             transition_distribution=tfd.Categorical(probs=t),
             observation_distribution=generate_hmm_distributions(transition_matrix=t, states_observable=states_observable)['observation_distribution'],
             time_varying_transition_distribution=True,
-            num_steps=time + 1))(Q)
+            num_steps=execution_duration + 1))(Q)
 
     return tf.keras.Model(inputs=adstock_input, outputs=out)
 
@@ -218,7 +220,7 @@ class CompilerInfo():
 
 def fit_model(model, adstock, emission_real):
     return model.fit(adstock,
-                         emission_real,
-                         epochs=EPOCHS,
-                         batch_size=BATCH_SIZE,
-                         verbose=True)
+                     emission_real,
+                     epochs=EPOCHS,
+                     batch_size=BATCH_SIZE,
+                     verbose=True)

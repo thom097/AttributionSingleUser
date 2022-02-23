@@ -52,7 +52,7 @@ LR_EXPONENTIAL_DECAY = False
 STATES_ARE_OBSERVABLE = False
 
 # PARAMETERS TO FIT THE HIDDEN MARKOV MODEL
-N_states = 4
+N_states = 3
 
 # Parameters to fit the HMM
 LEARNING_RATE = 1e-3

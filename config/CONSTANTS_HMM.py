@@ -22,7 +22,7 @@ decay_steps = 10000  # Only if LR_ExponentialDecay = 1 in config/execution_param
 decay_rate = 0.9  # Only if LR_ExponentialDecay = 1 in config/execution_parameters
 EPOCHS = 100
 BATCH_SIZE = 250
-basis = 1e-7
+basis = 1e-4
 
 # Parameters to run HMM in test mode
 # TODO: check this to be consistent with the N_camp from simulator

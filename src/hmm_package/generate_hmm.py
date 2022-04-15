@@ -228,10 +228,11 @@ class TransitionProbLayerMu(tf.keras.layers.Layer):
 # Layer for functional API
 class TransitionProbLayerBeta(tf.keras.layers.Layer):
 
-    def __init__(self, N_states, mu):  # N_states should be passed as parameter to the layer to determine matrix dimension
+    def __init__(self, N_states, mu, initializer = None):  # N_states should be passed as parameter to the layer to determine matrix dimension
         super(TransitionProbLayerBeta, self).__init__()
         self.N_states = N_states
         self.mu = mu
+        self.initializer = initializer[0]
 
     def build(self, input_shape):
         N_camp = input_shape[1]
@@ -244,9 +245,7 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         self.beta = self.add_weight("beta", shape=[beta_dim],
                                     dtype='float32',
                                     constraint = set_beta_sign(),
-                                    #initializer=tf.keras.initializers.Constant(BETA),
-                                    initializer=tf.keras.initializers.Constant([ 1, 0.5, -0.5, 0.5,
-                                                                                 0.5, 0.5, -0.5, 1]),
+                                    initializer=self.initializer,
                                     trainable=True)
 
     def call(self, adstock):
@@ -257,11 +256,11 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         return tf.math.maximum(Q, basis)
 
 
-def build_hmm_to_fit_beta(states_observable, mu):
+def build_hmm_to_fit_beta(states_observable, mu, initializer):
     # Generate functional model
 
     adstock_input = tf.keras.layers.Input(shape=(N_camp, execution_duration + 1,))
-    Q = TransitionProbLayerBeta(N_states, mu)(adstock_input)
+    Q = TransitionProbLayerBeta(N_states, mu, initializer)(adstock_input)
     out = tfp.layers.DistributionLambda(
         lambda t: tfd.HiddenMarkovModel(
             initial_distribution=generate_hmm_distributions(transition_matrix=t, states_observable=states_observable)['initial_distribution'],
@@ -293,13 +292,12 @@ def build_hmm_to_fit_mu(states_observable):
 # Define Loss Function for our model
 def loss_function(y, rv_y):
     """Negative log likelihood"""
-    posterior = tf.exp(rv_y.posterior_marginals(y).logits)[:,:,-1]
-    prior = tf.exp(rv_y.prior_marginals().logits[:,:,-1])
-    loss = tf.reduce_sum(tf.math.multiply(posterior, 1-prior)) +\
-           tf.reduce_sum(tf.math.multiply(1-posterior, prior))
-    #prior_probs = tf.exp(rv_y.prior_marginals().logits)[:,:,2]
-    #print(tf.reduce_sum(1 - prior_probs[y == 1]) + tf.reduce_sum(prior_probs[y == 0]))
-    return loss #tf.reduce_sum(1 - tf.math.multiply( tf.cast(y,tf.float32), prior_probs )) #+ tf.reduce_sum(prior_probs[tf.math.equal(y,1)])
+    #posterior = tf.exp(rv_y.posterior_marginals(y).logits)[:,:,-1]
+    #prior = tf.exp(rv_y.prior_marginals().logits[:,:,-1])
+    #loss = tf.reduce_sum(tf.math.multiply(posterior, 1-prior)) +\
+    #       tf.reduce_sum(tf.math.multiply(1-posterior, prior))
+
+    return -tf.reduce_sum(rv_y.log_prob(y))
 
 # Define Loss Function for our model
 def loss_function_mu_matrix(y, rv_y):

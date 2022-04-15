@@ -17,12 +17,8 @@ def set_matplotlib_properties():
 
 # Count conversions from REAL_HMM
 def count_conversions(emission_real, states_are_observable):
-    counter = 0
-    conversion_id = int(states_are_observable)+1
-    for ii in range(emission_real.shape[0]):
-        if emission_real[ii, -1] == conversion_id:
-            counter += 1
-    print(counter)
+    counter = sum(el[-1] for el in emission_real)
+    print(f"Percentage of conversion is: {counter/emission_real.shape[0]}%.")
     return counter
 
 

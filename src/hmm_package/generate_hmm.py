@@ -1,5 +1,5 @@
-#from config.CONSTANTS_HMM import *
-from config.execution_parameters import *
+from config.CONSTANTS_HMM import *
+#from config.execution_parameters import *
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -11,7 +11,8 @@ def simulate_observations():
     # This method builds a scenario to define which campaigns to attribute to each user and when
 
     exposition_vector = np.ones(N_exp_1) * 1
-    # exposition_vector = np.append(exposition_vector, np.ones(N_exp_2)*2)
+    exposition_vector = np.append(exposition_vector, np.ones(N_exp_2)*2)
+    #exposition_vector = np.append(exposition_vector, np.ones(N_exp_3) * 3)
     exposition_vector = exposition_vector.astype(int)
     observation = np.zeros([N_camp, execution_duration, N_users])
 
@@ -48,7 +49,6 @@ def compute_adstock(observation):
     adstock = tf.transpose(adstock, perm=[2, 0, 1])
     return adstock
 
-
 # Compile the transition matrix
 # TODO: This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
 # Compile the transition matrix
@@ -56,28 +56,27 @@ def compute_adstock(observation):
 def make_transition_matrix(mu, beta, adstock, basis=1e-10):
     batch_shape = tf.shape(adstock)[0]
     Q_final = tf.zeros([batch_shape, execution_duration, N_states, N_states])
+
+    # Premodify structure
+    # Reshape as square matrices
+    mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
+    beta_no_same_states = tf.reshape(beta, [N_camp, N_states - 1, N_states - 1])
+    mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
+
     for iterator in tf.range(batch_shape):
-
-        # Reshape as square matrices
-        mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
-        beta_no_same_states = tf.reshape(beta, [N_camp, N_states - 1, N_states - 1])
-
         # Compute mu+O'*beta
         # Take time elements. First of adstock is zeros.
         # Adstock = [users, campaigns, time]
-        O_beta = tf.tensordot(adstock[iterator, :, 1:], beta_no_same_states,
-                              [0, 0])  # ATTENZIONE ORA PRENDO SOLO UN ADSTOCK!!
-        mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
+        O_beta = tf.tensordot(adstock[iterator, :, 1:], beta_no_same_states, [0, 0])
 
         # Solve Matrix computation
         num = tf.exp(O_beta + mu_nosame_states)
         den_vec = 1 + tf.reduce_sum(num, 2)
         den = tf.reshape(den_vec, [execution_duration, N_states - 1, 1])
         Q_div = num / den
-
         Q_same = 1 - tf.math.reduce_sum(Q_div, 2)
-        Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
 
+        Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
         Q_temp = tf.linalg.set_diag(Q_temp, Q_same)
         Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=0), k=1)
         for ii in range(1, N_states - 1):
@@ -99,11 +98,38 @@ def make_transition_matrix(mu, beta, adstock, basis=1e-10):
     return Q_final
 
 
+# Simplified version of make_transition_matrix without beta computation
+def make_non_exposed_user_transtion_matrix(mu, adstock, basis = 1e-6):
+    batch_shape = tf.shape(adstock)[0]
+    mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
+    mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
+    num = tf.exp(mu_nosame_states)
+    den_vec = 1 + tf.reduce_sum(num, 2)
+    den = tf.reshape(den_vec, [execution_duration, N_states - 1, 1])
+    Q_div = num / den
+    Q_same = 1 - tf.math.reduce_sum(Q_div, 2)
+
+    Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
+    Q_temp = tf.linalg.set_diag(Q_temp, Q_same)
+    Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=0), k=1)
+    for ii in range(1, N_states - 1):
+        Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=ii), k=ii + 1)
+        Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=-ii), k=-ii)
+
+    # Attach the slice for last observable state
+    last_piece = np.ones([execution_duration, 1, N_states]) * basis
+    last_piece[:, 0, -1] = 1 - (N_states - 1) * basis
+
+    Q = tf.concat([Q_temp, last_piece], axis=1)
+    Q = tf.expand_dims(Q, axis=0)
+    return tf.repeat(Q, batch_shape, axis=0)
+
+
 # HMM Parameters
 def generate_hmm_distributions(states_observable, adstock=None, transition_matrix=None):
 
     if transition_matrix is not None: times_to_rep = tf.shape(transition_matrix)[0]
-    else: times_to_rep = N_users
+    else: times_to_rep = adstock.shape[0]
     # Set the user in the initial state
     initial_state_probs = np.zeros(N_states, dtype=np.float32)
     initial_state_probs[0] = 1
@@ -116,9 +142,9 @@ def generate_hmm_distributions(states_observable, adstock=None, transition_matri
         observation_distribution = tfd.Categorical(probs=tf.repeat(
             obs_mat.reshape(1, N_states, N_states), times_to_rep, axis=0))
     else:
-        obs_mat = np.zeros([N_states, 2], dtype=np.float32)
-        obs_mat[-1, -1] = 1
-        obs_mat[:-1, 0] = 1
+        obs_mat = np.zeros([N_states, 2], dtype=np.float32)+basis
+        obs_mat[-1, -1] = 1-basis
+        obs_mat[:-1, 0] = 1-basis
         observation_distribution = tfd.Categorical(probs=tf.repeat(
             obs_mat.reshape(1, N_states, 2), times_to_rep, axis=0))
 
@@ -149,12 +175,64 @@ def learning_rate(mode):
         raise ValueError("Mode can only be 0 for constant Learning Rate or 1 for exponential decay.")
     return lr
 
-# Layer for functional API
-class TransitionProbLayer(tf.keras.layers.Layer):
+
+class set_beta_sign(tf.keras.constraints.Constraint):
+    # TODO: this should depend on size.
+    def __call__(self, w):
+        #weights_correct_sign = []
+        #for idx, weight in enumerate(w):
+        #    weights_correct_sign.append(weight*tf.cast(tf.math.greater_equal(weight, 0.), w.dtype) if (idx+1)%N_states!=0 else
+        #                                weight*tf.cast(tf.math.greater_equal(-weight, 0.), w.dtype))
+        #final_weights = tf.concat(
+        #    weights_correct_sign, axis=0
+        #)
+        final_weights = tf.concat(
+            [w[0] * tf.cast(tf.math.greater_equal(w[0], 0.), w.dtype),
+            w[1] * tf.cast(tf.math.greater_equal(w[1], 0.), w.dtype),
+            w[2] * tf.cast(tf.math.greater_equal(-w[2], 0.), w.dtype),
+            w[3] * tf.cast(tf.math.greater_equal(w[3], 0.), w.dtype),
+            w[4] * tf.cast(tf.math.greater_equal(w[4], 0.), w.dtype),
+            w[5] * tf.cast(tf.math.greater_equal(w[5], 0.), w.dtype),
+            w[6] * tf.cast(tf.math.greater_equal(-w[6], 0.), w.dtype),
+            w[7] * tf.cast(tf.math.greater_equal(w[7], 0.), w.dtype)],
+            axis=0
+        )
+        return final_weights
+
+
+class TransitionProbLayerMu(tf.keras.layers.Layer):
 
     def __init__(self, N_states):  # N_states should be passed as parameter to the layer to determine matrix dimension
-        super(TransitionProbLayer, self).__init__()
+        super(TransitionProbLayerMu, self).__init__()
         self.N_states = N_states
+
+    def build(self, input_shape):
+        N_states = self.N_states
+
+        mu_dim = (N_states - 1) * (N_states - 1)
+        # TODO: set a variable to run with real parameters
+        self.mu = self.add_weight("mu", shape=[mu_dim],
+                                  dtype='float32',
+                                  #constraint=set_mu_sign(),
+                                  # initializer=tf.keras.initializers.Constant(-mu),
+                                  trainable=True)
+
+    def call(self, adstock):
+        # We suppose that the weights mu are all non-positive.
+        # TODO: remove basis from make_transition_matrix
+        Q = make_non_exposed_user_transtion_matrix(self.mu, adstock)
+
+        return tf.math.maximum(Q, basis)
+
+
+# Layer for functional API
+class TransitionProbLayerBeta(tf.keras.layers.Layer):
+
+    def __init__(self, N_states, mu, initializer = None):  # N_states should be passed as parameter to the layer to determine matrix dimension
+        super(TransitionProbLayerBeta, self).__init__()
+        self.N_states = N_states
+        self.mu = mu
+        self.initializer = initializer[0]
 
     def build(self, input_shape):
         N_camp = input_shape[1]
@@ -164,30 +242,25 @@ class TransitionProbLayer(tf.keras.layers.Layer):
         beta_dim = (N_states - 1) * (N_states - 1) * (N_camp)
         mu_dim = (N_states - 1) * (N_states - 1)
         # TODO: set a variable to run with real parameters
-        self.mu = self.add_weight("mu", shape=[mu_dim],
-                                  dtype='float32',
-                                  constraint=tf.keras.constraints.non_neg(),
-                                  # initializer=tf.keras.initializers.Constant(-mu),
-                                  trainable=True)
         self.beta = self.add_weight("beta", shape=[beta_dim],
                                     dtype='float32',
-                                    #constraint=tf.keras.constraints.non_neg(),
-                                    # initializer=tf.keras.initializers.Constant(beta),
+                                    constraint = set_beta_sign(),
+                                    initializer=self.initializer,
                                     trainable=True)
 
     def call(self, adstock):
         # We suppose that the weights mu are all non-positive.
         # TODO: remove basis from make_transition_matrix
-        Q = make_transition_matrix(-self.mu, self.beta, adstock, basis)
+        Q = make_transition_matrix(self.mu, self.beta, adstock, basis)
 
         return tf.math.maximum(Q, basis)
 
 
-def build_hmm_to_fit(states_observable):
+def build_hmm_to_fit_beta(states_observable, mu, initializer):
     # Generate functional model
 
     adstock_input = tf.keras.layers.Input(shape=(N_camp, execution_duration + 1,))
-    Q = TransitionProbLayer(N_states)(adstock_input)
+    Q = TransitionProbLayerBeta(N_states, mu, initializer)(adstock_input)
     out = tfp.layers.DistributionLambda(
         lambda t: tfd.HiddenMarkovModel(
             initial_distribution=generate_hmm_distributions(transition_matrix=t, states_observable=states_observable)['initial_distribution'],
@@ -199,11 +272,41 @@ def build_hmm_to_fit(states_observable):
     return tf.keras.Model(inputs=adstock_input, outputs=out)
 
 
+def build_hmm_to_fit_mu(states_observable):
+    # Generate functional model
+
+    adstock_input = tf.keras.layers.Input(shape=(N_camp, execution_duration + 1,))
+    Q = TransitionProbLayerMu(N_states)(adstock_input)
+    out = tfp.layers.DistributionLambda(
+        lambda t: tfd.HiddenMarkovModel(
+            initial_distribution=tfd.Categorical(probs=[1,0,0]),
+            transition_distribution=tfd.Categorical(probs=t),
+            observation_distribution=tfd.Categorical(
+                probs = np.array([[1.0,0.0],[1.0,0.0],[0.0,1.0]], dtype=np.float32).reshape(1,3,2) ),
+            time_varying_transition_distribution=True,
+            num_steps=execution_duration + 1))(Q)
+
+    return tf.keras.Model(inputs=adstock_input, outputs=out)
+
+
 # Define Loss Function for our model
 def loss_function(y, rv_y):
     """Negative log likelihood"""
+    #posterior = tf.exp(rv_y.posterior_marginals(y).logits)[:,:,-1]
+    #prior = tf.exp(rv_y.prior_marginals().logits[:,:,-1])
+    #loss = tf.reduce_sum(tf.math.multiply(posterior, 1-prior)) +\
+    #       tf.reduce_sum(tf.math.multiply(1-posterior, prior))
+
     return -tf.reduce_sum(rv_y.log_prob(y))
 
+# Define Loss Function for our model
+def loss_function_mu_matrix(y, rv_y):
+    """Negative log likelihood"""
+    loss_final_state_too_low = max([0, 0.67*(0.75 - rv_y.transition_distribution.probs[0,0,-2,-2])])
+        #max([0, 16.7*(0.03-np.linalg.matrix_power( rv_y.transition_distribution.probs[0,0,:].numpy(), 31 )[0,2])]) +\
+        #max([0, 0.67*(0.75 - rv_y.transition_distribution.probs[0,0,-2,-2])])
+    loss = tf.reduce_sum(1-rv_y.tensor_distribution.prob(y))/BATCH_SIZE + loss_final_state_too_low
+    return loss#-tf.reduce_sum(rv_y.log_prob(y))
 
 # Define optimizer
 def optimizer_function(lr_type):
@@ -212,15 +315,24 @@ def optimizer_function(lr_type):
 
 
 # Define a handler to return the compiler options
-class CompilerInfo():
+class CompilerInfoBeta():
     def __init__(self, lr_type):
         self.loss = loss_function
         self.optimizer = optimizer_function(lr_type)
 
 
+# Define a handler to return the compiler options
+class CompilerInfoMu():
+    def __init__(self, lr_type):
+        self.loss = loss_function_mu_matrix
+        self.optimizer = optimizer_function(lr_type)
+
+
 def fit_model(model, adstock, emission_real):
+    print_weights = tf.keras.callbacks.LambdaCallback(on_epoch_begin=lambda batch, logs: print(f"Beta: {list(model.get_weights())}"))
     return model.fit(adstock,
                      emission_real,
                      epochs=EPOCHS,
                      batch_size=BATCH_SIZE,
+                     callbacks=[print_weights],
                      verbose=True)

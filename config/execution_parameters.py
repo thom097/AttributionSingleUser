@@ -47,7 +47,7 @@ users_actions_flag = 0  # Flag to activate possibility of users taking an extern
 discount_factor = 0.8
 
 # For HMM
-LR_EXPONENTIAL_DECAY = False
+LR_EXPONENTIAL_DECAY = True
 # This variable helps understand if the fit works or not. If TRUE the HMM is not hidden!
 STATES_ARE_OBSERVABLE = False
 
@@ -59,6 +59,6 @@ LEARNING_RATE = 1e-3
 initial_learning_rate = 1e-2  # Only if LR_EXPONENTIAL_DECAY = True in config/execution_parameters
 decay_steps = 10000  # Only if LR_ExponentialDecay = 1 in config/execution_parameters
 decay_rate = 0.9  # Only if LR_ExponentialDecay = 1 in config/execution_parameters
-EPOCHS = 100
-BATCH_SIZE = 256
-basis = 1e-7
+EPOCHS = 10000
+BATCH_SIZE = 250
+basis = 1e-4

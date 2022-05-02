@@ -49,56 +49,84 @@ def compute_adstock(observation):
     adstock = tf.transpose(adstock, perm=[2, 0, 1])
     return adstock
 
-# Compile the transition matrix
-# TODO: This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
-# Compile the transition matrix
-# This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
+
 def make_transition_matrix(mu, beta, adstock, basis=1e-10):
+
+    len_mu = tf.shape(mu)[0]
     batch_shape = tf.shape(adstock)[0]
-    Q_final = tf.zeros([batch_shape, execution_duration, N_states, N_states])
 
-    # Premodify structure
-    # Reshape as square matrices
-    mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
-    beta_no_same_states = tf.reshape(beta, [N_camp, N_states - 1, N_states - 1])
-    mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
+    beta_reshaped = tf.concat([tf.zeros([N_states-1,1]), tf.reshape(beta, [N_camp, len_mu])], axis=1)
+    O_beta = tf.tensordot(adstock[:,:,1:], beta_reshaped, axes=[1, 0])
 
-    for iterator in tf.range(batch_shape):
-        # Compute mu+O'*beta
-        # Take time elements. First of adstock is zeros.
-        # Adstock = [users, campaigns, time]
-        O_beta = tf.tensordot(adstock[iterator, :, 1:], beta_no_same_states, [0, 0])
+    mu_reshaped = tf.expand_dims(tf.expand_dims( tf.concat([[-np.inf],mu],axis=0) , axis=0), axis=0)
+    mu_reshaped = tf.repeat(tf.repeat(mu_reshaped, batch_shape, axis=0), execution_duration, axis=1)
 
-        # Solve Matrix computation
-        num = tf.exp(O_beta + mu_nosame_states)
-        den_vec = 1 + tf.reduce_sum(num, 2)
-        den = tf.reshape(den_vec, [execution_duration, N_states - 1, 1])
-        Q_div = num / den
-        Q_same = 1 - tf.math.reduce_sum(Q_div, 2)
+    mu_plus_Obeta = tf.reshape( tf.expand_dims(mu_reshaped+O_beta, axis=-1), [batch_shape, execution_duration, N_states-1, -1])
+    num = tf.exp(mu_plus_Obeta)
+    den = 1 + tf.reduce_sum(num, axis=3)
+    main_diag = tf.concat([1/den, tf.ones([batch_shape, execution_duration, 1])], axis=-1)
+    lower_diag = tf.concat([num[:, :, 1:, 0] / den[:, :, 1:], tf.zeros([batch_shape, execution_duration, 1])], axis=-1)
+    upper_diag = num[:, :, :, 1] / den
 
-        Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
-        Q_temp = tf.linalg.set_diag(Q_temp, Q_same)
-        Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=0), k=1)
-        for ii in range(1, N_states - 1):
-            Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=ii), k=ii + 1)
-            Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=-ii), k=-ii)
+    Q = tf.zeros([batch_shape, execution_duration, N_states, N_states])
+    Q = tf.linalg.set_diag(Q, main_diag)
+    Q = tf.linalg.set_diag(Q, lower_diag, k=-1)
+    Q = tf.linalg.set_diag(Q, upper_diag, k=1)
 
-        # Attach the slice for last observable state
-        last_piece = np.ones([execution_duration, 1, N_states]) * basis
-        last_piece[:, 0, -1] = 1 - (N_states - 1) * basis
+    return tf.math.maximum(Q, basis)
 
-        Q_iter = tf.concat([Q_temp, last_piece], axis=1)
-        Q_iter = tf.expand_dims(Q_iter, axis=0)
-        if iterator == 0:
-            Q_final = Q_iter
 
-        else:
-            Q_final = tf.concat([Q_final, Q_iter], axis=0)
-
-    return Q_final
+# # Compile the transition matrix
+# # TODO: This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
+# # Compile the transition matrix
+# # This works with an iterator, which may result slow. Improve through straight computation of matrix when there is time
+# def make_transition_matrix(mu, beta, adstock, basis=1e-10):
+#     batch_shape = tf.shape(adstock)[0]
+#     Q_final = tf.zeros([batch_shape, execution_duration, N_states, N_states])
+#
+#     # Premodify structure
+#     # Reshape as square matrices
+#     mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
+#     beta_no_same_states = tf.reshape(beta, [N_camp, N_states - 1, N_states - 1])
+#     mu_nosame_states = tf.repeat(mu_nosame_states, execution_duration, axis=0)
+#
+#     for iterator in tf.range(batch_shape):
+#         # Compute mu+O'*beta
+#         # Take time elements. First of adstock is zeros.
+#         # Adstock = [users, campaigns, time]
+#         O_beta = tf.tensordot(adstock[iterator, :, 1:], beta_no_same_states, [0, 0])
+#
+#         # Solve Matrix computation
+#         num = tf.exp(O_beta + mu_nosame_states)
+#         den_vec = 1 + tf.reduce_sum(num, 2)
+#         den = tf.reshape(den_vec, [execution_duration, N_states - 1, 1])
+#         Q_div = num / den
+#         Q_same = 1 - tf.math.reduce_sum(Q_div, 2)
+#
+#         Q_temp = tf.zeros([execution_duration, N_states - 1, N_states], dtype=tf.float32)
+#         Q_temp = tf.linalg.set_diag(Q_temp, Q_same)
+#         Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=0), k=1)
+#         for ii in range(1, N_states - 1):
+#             Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=ii), k=ii + 1)
+#             Q_temp = tf.linalg.set_diag(Q_temp, tf.linalg.diag_part(Q_div, k=-ii), k=-ii)
+#
+#         # Attach the slice for last observable state
+#         last_piece = np.ones([execution_duration, 1, N_states]) * basis
+#         last_piece[:, 0, -1] = 1 - (N_states - 1) * basis
+#
+#         Q_iter = tf.concat([Q_temp, last_piece], axis=1)
+#         Q_iter = tf.expand_dims(Q_iter, axis=0)
+#         if iterator == 0:
+#             Q_final = Q_iter
+#
+#         else:
+#             Q_final = tf.concat([Q_final, Q_iter], axis=0)
+#
+#     return Q_final
 
 
 # Simplified version of make_transition_matrix without beta computation
+
 def make_non_exposed_user_transtion_matrix(mu, adstock, basis = 1e-6):
     batch_shape = tf.shape(adstock)[0]
     mu_nosame_states = tf.reshape(mu, [1, N_states - 1, N_states - 1])
@@ -126,15 +154,18 @@ def make_non_exposed_user_transtion_matrix(mu, adstock, basis = 1e-6):
 
 
 # HMM Parameters
-def generate_hmm_distributions(states_observable, adstock=None, transition_matrix=None):
+def generate_hmm_distributions(states_observable, initial_state_prob_vector,
+                               adstock=None, transition_matrix=None):
 
     if transition_matrix is not None: times_to_rep = tf.shape(transition_matrix)[0]
     else: times_to_rep = adstock.shape[0]
     # Set the user in the initial state
-    initial_state_probs = np.zeros(N_states, dtype=np.float32)
-    initial_state_probs[0] = 1
-    initial_distribution = tfd.Categorical(probs=tf.repeat(initial_state_probs.reshape(1, -1), times_to_rep, axis=0))
+    initial_state_probs = tf.concat([initial_state_prob_vector, [1-tf.reduce_sum(initial_state_prob_vector), 0]], axis=0)
 
+    #if tf.shape(initial_state_probs)[0] != N_states or abs(sum(initial_state_probs) - 1) > 1e-7:
+    #    raise ValueError(f"The initial_state_prob_vector must have {N_states-2} values!")
+
+    initial_distribution = tfd.Categorical(probs=tf.repeat(tf.expand_dims(initial_state_probs, axis=0), times_to_rep, axis=0))
     # TODO: change the observation into a function depending on N_states
     if states_observable:
         # The HMM is not hidden.
@@ -188,13 +219,13 @@ class set_beta_sign(tf.keras.constraints.Constraint):
         #)
         final_weights = tf.concat(
             [w[0] * tf.cast(tf.math.greater_equal(w[0], 0.), w.dtype),
-            w[1] * tf.cast(tf.math.greater_equal(w[1], 0.), w.dtype),
-            w[2] * tf.cast(tf.math.greater_equal(-w[2], 0.), w.dtype),
+            w[1] * tf.cast(tf.math.greater_equal(-w[1], 0.), w.dtype),
+            w[2] * tf.cast(tf.math.greater_equal(w[2], 0.), w.dtype),
             w[3] * tf.cast(tf.math.greater_equal(w[3], 0.), w.dtype),
-            w[4] * tf.cast(tf.math.greater_equal(w[4], 0.), w.dtype),
-            w[5] * tf.cast(tf.math.greater_equal(w[5], 0.), w.dtype),
-            w[6] * tf.cast(tf.math.greater_equal(-w[6], 0.), w.dtype),
-            w[7] * tf.cast(tf.math.greater_equal(w[7], 0.), w.dtype)],
+            w[4] * tf.cast(tf.math.greater_equal(-w[4], 0.), w.dtype),
+            w[5] * tf.cast(tf.math.greater_equal(w[5], 0.), w.dtype)],
+            #w[6] * tf.cast(tf.math.greater_equal(-w[6], 0.), w.dtype),
+            #w[7] * tf.cast(tf.math.greater_equal(w[7], 0.), w.dtype)],
             axis=0
         )
         return final_weights
@@ -239,35 +270,44 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         days = input_shape[2]
         N_states = self.N_states
 
-        beta_dim = (N_states - 1) * (N_states - 1) * (N_camp)
-        mu_dim = (N_states - 1) * (N_states - 1)
+        mu_dim = 1 + 2 * (N_states - 2)
+        beta_dim = mu_dim * N_camp
+        init_prob_dim = N_states - 2
+
         # TODO: set a variable to run with real parameters
         self.beta = self.add_weight("beta", shape=[beta_dim],
                                     dtype='float32',
                                     constraint = set_beta_sign(),
                                     initializer=self.initializer,
                                     trainable=True)
+        self.init_prob = self.add_weight("init_prob", shape=[init_prob_dim],
+                                         dtype='float32',
+                                         trainable=True)
 
     def call(self, adstock):
         # We suppose that the weights mu are all non-positive.
         # TODO: remove basis from make_transition_matrix
         Q = make_transition_matrix(self.mu, self.beta, adstock, basis)
-
-        return tf.math.maximum(Q, basis)
+        init_prob = tf.keras.activations.sigmoid(self.init_prob)
+        return {"Q": Q, "init_prob": init_prob}
 
 
 def build_hmm_to_fit_beta(states_observable, mu, initializer):
     # Generate functional model
 
     adstock_input = tf.keras.layers.Input(shape=(N_camp, execution_duration + 1,))
-    Q = TransitionProbLayerBeta(N_states, mu, initializer)(adstock_input)
+    parameters = TransitionProbLayerBeta(N_states, mu, initializer)(adstock_input)
     out = tfp.layers.DistributionLambda(
         lambda t: tfd.HiddenMarkovModel(
-            initial_distribution=generate_hmm_distributions(transition_matrix=t, states_observable=states_observable)['initial_distribution'],
-            transition_distribution=tfd.Categorical(probs=t),
-            observation_distribution=generate_hmm_distributions(transition_matrix=t, states_observable=states_observable)['observation_distribution'],
+            initial_distribution=generate_hmm_distributions(initial_state_prob_vector=t['init_prob'],
+                                                            transition_matrix=t['Q'],
+                                                            states_observable=states_observable)['initial_distribution'],
+            transition_distribution=tfd.Categorical(probs=t['Q']),
+            observation_distribution=generate_hmm_distributions(initial_state_prob_vector=t['init_prob'],
+                                                                transition_matrix=t['Q'],
+                                                                states_observable=states_observable)['observation_distribution'],
             time_varying_transition_distribution=True,
-            num_steps=execution_duration + 1))(Q)
+            num_steps=execution_duration + 1))(parameters)
 
     return tf.keras.Model(inputs=adstock_input, outputs=out)
 
@@ -329,7 +369,7 @@ class CompilerInfoMu():
 
 
 def fit_model(model, adstock, emission_real):
-    print_weights = tf.keras.callbacks.LambdaCallback(on_epoch_begin=lambda batch, logs: print(f"Beta: {list(model.get_weights())}"))
+    print_weights = tf.keras.callbacks.LambdaCallback(on_epoch_begin=lambda batch, logs: print(f"Weights: {list(model.get_weights()[0])+list(tf.keras.activations.sigmoid(model.get_weights()[1]))}"))
     return model.fit(adstock,
                      emission_real,
                      epochs=EPOCHS,

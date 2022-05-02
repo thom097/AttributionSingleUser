@@ -35,5 +35,6 @@ N_exp_2 = 6000
 #N_exp_3 = 1200
 
 # Parameters to define Users behaviour. See Abishek paper
-MU = [ -2.7419195, -7.4647417, -1.1010361, -5.92728  ]
-BETA = [0.7, 0.25, -0.3, 0.15, 0.4, 0.1, -0.4, 0.8]
+MU = [ -2.7419195, -1.1010361, -5.92728  ]
+BETA = [0.7, -0.3, 0.15, 0.4, -0.4, 0.8]
+INITIAL_STATE_PROB = [0.8] # Probability of entering the HMM in the first N_states-2 states. Must be same length of N_states

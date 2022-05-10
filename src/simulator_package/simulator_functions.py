@@ -1,54 +1,77 @@
-from src.plot_and_print_info.plots_and_print_info import *
 import numpy as np
+
 #from config.CONSTANTS_SIMULATOR import *
 from config.execution_parameters import *
+from src.plot_and_print_info.plots_and_print_info import *
 
-# Joint Exposition Function
+
 def joint_exposition_p(marginal_prob):
-    # INPUT: marginal_prob: vector with all the marginal probabilities
-    # OUTPUT: p_exp: a single joint probability computed through weight function w
-
+    '''
+    This function computes the joint probability of exposition to a campaign, given the marginal ones
+    :param marginal_prob: vector with all the marginal probabilities
+    :return p_exp: a single joint probability computed through weight function w
+    '''
     w = marginal_prob * marginal_prob - marginal_prob + 1  # weight function. Adjust if needed
     p_exp = (w * marginal_prob).sum() / w.sum()
-
     return p_exp
 
 
-# Influence generator function from exposition probability
 def influence_generator(exposition_probability):
+    '''
+    This function should compute the basis value of the influence of a campaign on the user
+    :param exposition_probability: Probability for a user of being exposed to a campaign
+    :return influence: Influence of the campaign on the user
+    '''
     influence = exposition_probability / 1.5  # TODO: COSA A CASO, PENSARE A COME
-
     return influence
 
 
-# Function A: growth function for old influence...TODO:  aggiusta con senso
-def growth_function( old_influence ):
-    coefficient = np.tanh(old_influence)+1
-
+def growth_function(old_influence):
+    '''
+    The discount function is denoted in the paper as Function A.
+    The function returns the coefficient of the influence given by previous campaigns.
+    :param old_influence: Influence given by previous exposition of the user to other campaigns
+    :return coefficient: the multiplicative coefficient to take into account previous expositions
+    '''
+    coefficient = 1.5*np.tanh(old_influence)+1 # TODO:  aggiusta con senso
     return coefficient
 
 
-# Function G: discount in time... TODO: aggiustare un po, ha picco troppo alto
 def discount_function(original_vector):
+    '''
+    The discount function is denoted in the paper as Function G.
+    We take into account that a campaign has its maximum effect a few after the exposition. This function gives the
+    temporal coefficient of this effect. Coeff = [ln(0.1t+1)+2.8]/[(0.8t-1)^2+1.8]
+    :param original_vector: Vector with previous influences
+    :return discounted_funnel_position: float with the influence of previous expositions adjusted in time
+    '''
     t = np.linspace(len(original_vector) - 1, 0, len(original_vector))
-    discount_factors = (np.log(0.1 * t + 1) + 2.8) / (np.power(0.8 * t - 1, 2) + 1.8)
-
+    discount_factors = (np.log(0.1 * t + 1) + 2.8) / (np.power(0.8 * t - 1, 2) + 1.8) # TODO: aggiustare un po, ha picco troppo alto
     discounted_funnel_position = original_vector * discount_factors
     discounted_funnel_position = np.sum(discounted_funnel_position)
-
     return discounted_funnel_position
 
 
-# Function S: rescale discounted funnel_position in [0,1]
-# TODO: set the coefficient in constant functions?
 def rescale_function(discounted_funnel_position):
+    '''
+    The rescale function is denoted in the paper as Function S.
+    The function has the goal of rescaling the funnel position into the interval (0,1)
+    :param discounted_funnel_position:
+    :return:
+    '''
+    # TODO: set the coefficient in constant functions?
     rescaled_funnel_position = np.tanh(0.75 * discounted_funnel_position)
-
     return rescaled_funnel_position
 
 
 # Function to generate campaign dictionaries
 def generate_campaign(name, target):
+    '''
+    Initialize the dictionary with all the information needed to define a campaign
+    :param name: Name of the campaign
+    :param target: Target of the campaign, which can be 'awareness', 'traffic' or 'conversion'
+    :return campaign: Dictionary with all the information
+    '''
     campaign = {
         "name": name,
         "target": target,
@@ -79,6 +102,11 @@ def generate_campaign(name, target):
 
 
 def generate_empty_dictionaries():
+    '''
+    This method generates initializes the dictionary for users and campaigns for a simulation.
+    :return user_list: a dictionary containing N_users initialized users for the simulation
+    :return campaigns_list: a dictionary containing the initialized campaigns
+    '''
     user_list = {}
 
     for ii in range(N_users):
@@ -104,8 +132,12 @@ def generate_empty_dictionaries():
     return [user_list, campaigns_list]
 
 
-# Function to define User dictionaries
 def generate_user(name):
+    """
+    The method creates an initialized user with all zeros values and the correct shapes.
+    :param name: Id of the user
+    :return user: dictionary with information initialized for one user
+    """
     user = {"name": name, "funnel_position": 0, "entering_time": 0, "history": np.zeros([N_camp, time]),
             "actions": np.zeros(time), "conversion": 0, "feat": []}
 
@@ -120,9 +152,11 @@ def generate_user(name):
     return user
 
 
-# Given the campaigns and number of expositions, create a list
 def build_exposition_vector():
-
+    """
+    The method is in charge of creating the vector with the expositions to assign
+    :return exposition_vector: Vector with len=number of daily expositions
+    """
     cont = 0
     exposition_vector = []
     for camp in campaigns:
@@ -132,22 +166,46 @@ def build_exposition_vector():
     return exposition_vector.astype(int)
 
 
-# If the user is exposed to an awareness or traffic campaign, then this function computes the contribute of a click/no-click action
-def simulate_response(target):
-    if target == "awareness":
-        clk = np.random.binomial(1, p_click_awn)
-        reward = (clk == 0) * reward_noclick_awn + (clk == 1) * reward_click_awn
-        return reward
-    elif target == "traffic":
-        clk = np.random.binomial(1, p_click_traff)
-        reward = (clk == 0) * reward_noclick_traff + (clk == 1) * reward_click_traff
-        return reward
+def simulate_response(user, campaign):
+    """
+    For a user state and a campaign, the method decides whether the user had an interaction or not
+    :param user: dictionary with the information on the user
+    :param campaign: dictionary with the information of the campaign
+    :return:
+    """
+    if campaign['target'] == "awareness":
+        clk = np.random.binomial(1, p_click_awn)*(user['funnel_position']>0.4)
+        #reward = (clk == 0) * reward_noclick_awn + (clk == 1) * reward_click_awn
+        return 1+0.01*clk #reward
+    elif campaign['target'] == "traffic":
+        clk = np.random.binomial(1, p_click_traff)*(user['funnel_position']>0.4)
+        #reward = (clk == 0) * reward_noclick_traff + (clk == 1) * reward_click_traff
+        return 1+0.01*clk #reward
+    elif campaign['target'] == "conversion":
+        clk = np.random.binomial(1, p_click_traff)*(user['funnel_position']>0.4)
+        #reward = (clk == 0) * reward_noclick_traff + (clk == 1) * reward_click_traff
+        return 1+0.01*clk #reward
     else:
         return 1
 
 
 class SimulationClass:
-
+    '''
+    The SimulationClass is in charge of packing all the necessary methods to run a simulation and store its results.
+    The attributes of the class are:
+        - analysis_mode: type=bool, indicates whether we want to store all the information of the execution or just the
+                                results;
+        - user_list: type=dict, this dict has a fixed length, corresponding to the number of users we update at the same
+                                time. Note that every time there is a conversion or more than 'time_failure' days has
+                                passed, the corresponding user in user_list is resetted with a new one.
+        - campaign_list: type=dict, this dict will store the information on the campaigns;
+        - results: type=dict, in this attribute, the results of the simulation necessary to fit the model are stored.
+                                This includes two main keys: 'user_expositions', with the data on which campaigns has
+                                been shown to a user in a certain day, and 'user_outcome' with the response of the user.
+        - simulation: type=dict, is an enhanced version of the results, where we keep track of ALL the users simulated
+                                in the execution, and not only the active ones in user_list.
+        - state: type=dict, stores the number of total users generated, and the number of conversions reached.
+    '''
     def __init__(self, analysis_mode):
 
         self.analysis_mode = analysis_mode
@@ -167,6 +225,11 @@ class SimulationClass:
     # TODO: remove simulation from functions when not needed
     # Simulate the campaign evolution
     def simulate(self):
+        """
+        This is the core method of the class Simulation, in charge of simulating the evolution of the whole campaign.
+        For every day, it assigns the expositions randomly to the users, and compute their evolution in the funnel.
+        :return:
+        """
 
         # Reset history before simulation TODO: check that this actually works
         if 'flag' in globals():
@@ -210,6 +273,11 @@ class SimulationClass:
                 self.simulation["funnel_position_history"][:, day] = \
                     [self.compute_rescaled_funnel_position(day, temp_usr) for temp_usr in range(N_users)]
 
+        for ii in range(N_users):
+            elapsed_time = day+1 - self.user_list[ii]["entering_time"]
+            if elapsed_time == execution_duration:
+                self.reset_user(ii, day+1, has_converted=False)
+
     # Reset a user and create a new one
     def reset_user(self, usr, day, has_converted):
         self.save_result(usr, day, has_converted)
@@ -218,13 +286,16 @@ class SimulationClass:
         self.user_list[usr]["entering_time"] = day
 
     def save_result(self, usr, day, has_converted):
-        outcome = np.zeros([1, time_failure])
-        # TODO: check if you start on initial_time or (-1/+1) and the same for day
         initial_time = self.user_list[usr]["entering_time"]
+        outcome = np.zeros([1,time_failure])
+        actions = self.user_list[usr]['actions'][initial_time:time_failure+initial_time]
+        outcome[0,:len(actions)] += actions
+        # TODO: check if you start on initial_time or (-1/+1) and the same for day
         expositions = np.transpose(self.simulation["expositions"][initial_time:day, usr:1+usr, :], [2, 0, 1])
 
         if has_converted:
-            outcome[0,day-initial_time:] = 1
+            # The conversion index is 2, as the value 1 is used to store expositions
+            outcome[0,day-initial_time:] = 2
             expositions = np.append(expositions, np.zeros([N_camp, time_failure+initial_time-day, 1]), axis=1)
 
         self.results["user_outcome"] = np.append(self.results["user_outcome"], outcome, axis=0)
@@ -255,7 +326,11 @@ class SimulationClass:
         influence = self.campaigns_list[campaign]["influence"][self.user_list[user]["target_group"]]
 
         # Coefficient for response
-        R_coefficient = simulate_response(user)
+        R_coefficient = simulate_response(self.user_list[user], self.campaigns_list[campaign])
+
+        # If there was a click, save it
+        if R_coefficient>1:
+            self.user_list[user]['actions'][t] = 1
 
         # Coefficient due to old expositions
         hist = self.user_list[user]["history"][self.campaigns_list[campaign]["who_can_affect_me"], 0:t]

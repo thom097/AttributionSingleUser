@@ -1,7 +1,7 @@
 # ENVIRONMENT PARAMETERS
 time = execution_duration = 30  # Days
 lw = 2  # line width, for plots
-N_users = 20000  # Set users' pool dimension. Notice that the total number of users is dynamical
+N_users = 5000  # Set users' pool dimension. Notice that the total number of users is dynamical
 
 ########################################################################################################################
 ########################################################################################################################
@@ -26,16 +26,23 @@ basis = 1e-4
 
 # Parameters to run HMM in test mode
 # TODO: check this to be consistent with the N_camp from simulator
-N_camp = 2
+N_camp = 4
 
 discount_factor = 0.8
-p_exp = [0.5, 0.5, 0.4] # Probability of exposition to each campaign
-N_exp_1 = 8000
-N_exp_2 = 6000
+p_exp = [0.7, 0.7, 0.7, 0.7] # Probability of exposition to each campaign
+DEFAULT_IMPRESSIONS = {
+    'N_exp_1': 2000,
+    'N_exp_2': 2000,
+}
 #N_exp_3 = 1200
 
 # Parameters to define Users behaviour. See Abishek paper
 MU = [ -2.7419195, -1.1010361, -5.92728  ]
-BETA = [0.7, -0.3, 0.15, 0.4, -0.4, 0.8]
-INITIAL_STATE_PROB = [0.8] # Probability of entering the HMM in the first N_states-2 states. Must be same length of N_states
+BETA = [0.75, -0.6, 0.1,
+        0.3, -0.4, 0.5,
+        0.1, -0.5, 0.9,
+        0., -0.1, 0.1
+        ]
+#BETA = [0.7, -0.3, 0.15, 0.4, -0.4, 0.8]
+INITIAL_STATE_PROB = [0.9] # Probability of entering the HMM in the first N_states-2 states. Must be same length of N_states
 CLICK_PROB = [0.2]

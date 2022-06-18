@@ -409,11 +409,11 @@ class SimulationClass:
         self.reset_user(cm, usr, day, has_converted=True)
 
     # Plot results of the simulation
-    def plot_results(self):
+    def plot_results(self, cm):
         if self.analysis_mode:
             set_matplotlib_properties()
-            plot_all_funnel_positions(self)
-            plot_conversion_paths(self)
+            plot_all_funnel_positions(cm, self)
+            plot_conversion_paths(cm, simulation=self)
 
 
 

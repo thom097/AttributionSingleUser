@@ -3,26 +3,27 @@ import csv
 import os
 from scipy.special import digamma
 from src.hmm_package.generate_hmm import *
-from config.CONSTANTS_HMM import time, N_users
 
 
 class OptimizerPGPE:
 
-    def __init__(self, hmm_trials, num_sample, N_users_to_simulate, init_values = None, uniform_initialization = None):
+    def __init__(self, cm, hmm_trials, num_sample, N_users_to_simulate, init_values = None, uniform_initialization = None):
         """
         The class OptimizerPGPE contains the methods necessary to optimize the budget allocation for the Hidden Markov
         Model fitted previously.
+        :param cm: constants manager
         :param hmm_trials: Number of times we sample from the HMM to reduce variance in computing the conversion per
-        :param num_sample:
-        :param N_users_to_simulate:
-        :param init_values:
-        :param uniform_initialization:
+        :param num_sample: Number of samples we extract from the Dirichlet at each step
+        :param N_users_to_simulate: Dimension of the pool of users
+        :param init_values: Initial budget distribution
+        :param uniform_initialization: If initial distribution is not specified, take rules from this dict
         """
 
         if init_values is None:
             init_values = np.ones(uniform_initialization['num_campaigns'])/uniform_initialization['num_campaigns']
             init_values *= uniform_initialization['tot_impressions']
 
+        self.cm = cm
         self.epsilon = 1e-16
         self.hmm_trials = hmm_trials
         self.num_sample = num_sample
@@ -44,11 +45,11 @@ class OptimizerPGPE:
         avg_conversion = 0
 
         # Generate Test observation
-        observation = simulate_observations(impressions=impressions, number_of_users=self.number_of_users)
+        observation = simulate_observations(self.cm, impressions=impressions, number_of_users=self.number_of_users)
         # Compute Adstock
-        adstock = compute_adstock(observation=observation)
-        hmm_distributions = generate_hmm_distributions(initial_state_prob_vector=INITIAL_STATE_PROB,
-                                                       click_prob=tf.constant(CLICK_PROB),
+        adstock = compute_adstock(self.cm, observation=observation)
+        hmm_distributions = generate_hmm_distributions(self.cm, initial_state_prob_vector=self.cm['INITIAL_STATE_PROB'],
+                                                       click_prob=tf.constant(self.cm['CLICK_PROB']),
                                                        adstock=adstock)
 
         # Build Real HMM to simulate
@@ -57,7 +58,7 @@ class OptimizerPGPE:
             transition_distribution=hmm_distributions['transition_distribution'],
             observation_distribution=hmm_distributions['observation_distribution'],
             time_varying_transition_distribution=True,
-            num_steps=time + 1
+            num_steps=self.cm['time'] + 1
         )
 
         # To reduce noise, we compute the average conversion on this particular campaign

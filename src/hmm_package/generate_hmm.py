@@ -6,8 +6,15 @@ import pickle
 import os
 
 # Observation generator
-def simulate_observations():
+def simulate_observations(cm, impressions=None, number_of_users=None):
     # This method builds a scenario to define which campaigns to attribute to each user and when
+    exposition_vector = []
+    if not impressions:
+        for campaign, this_impressions in cm['DEFAULT_IMPRESSIONS'].items():
+            exposition_vector = np.append(exposition_vector, np.ones(this_impressions) * int(campaign.split('_')[-1]))
+    else:
+        for campaign, this_impressions in enumerate(impressions):
+            exposition_vector = np.append(exposition_vector, np.ones(this_impressions) * campaign+1)
 
     if not number_of_users:
         number_of_users = cm['N_users']
@@ -208,6 +215,9 @@ def learning_rate(cm, mode):
 
 class set_beta_sign(tf.keras.constraints.Constraint):
     # TODO: this should depend on size.
+    def __init__(self, N_states):
+        self.weigths_per_campaign = 1+2*(N_states-2)
+
     def __call__(self, w):
         #weights_correct_sign = []
         #for idx, weight in enumerate(w):
@@ -216,51 +226,17 @@ class set_beta_sign(tf.keras.constraints.Constraint):
         #final_weights = tf.concat(
         #    weights_correct_sign, axis=0
         #)
-        final_weights = tf.concat(
-            [w[0] * tf.cast(tf.math.greater_equal(w[0], 0.), w.dtype),
-            w[1] * tf.cast(tf.math.greater_equal(-w[1], 0.), w.dtype),
-            w[2] * tf.cast(tf.math.greater_equal(w[2], 0.), w.dtype),
-            w[3] * tf.cast(tf.math.greater_equal(w[3], 0.), w.dtype),
-            w[4] * tf.cast(tf.math.greater_equal(-w[4], 0.), w.dtype),
-            w[5] * tf.cast(tf.math.greater_equal(w[5], 0.), w.dtype),
-            w[6] * tf.cast(tf.math.greater_equal(w[6], 0.), w.dtype),
-            w[7] * tf.cast(tf.math.greater_equal(-w[7], 0.), w.dtype),
-            w[8] * tf.cast(tf.math.greater_equal(w[8], 0.), w.dtype)
-             ], axis=0
-        )
-        return final_weights
+        weights = []
+        for idx, weight in enumerate(w):
+            sign = -1 if (idx%self.weigths_per_campaign)%2 else 1
+            weights.append(weight * tf.cast(tf.math.greater_equal(sign*weight, 0.), w.dtype))
 
-
-class TransitionProbLayerMu(tf.keras.layers.Layer):
-
-    def __init__(self, cm, N_states):  # cm['N_states'] should be passed as parameter to the layer to determine matrix dimension
-        super(TransitionProbLayerMu, self).__init__()
-        self.N_states = N_states
-        self.cm = cm
-
-    def build(self, input_shape):
-        N_states = self.N_states
-
-        mu_dim = (N_states - 1) * (N_states - 1)
-        # TODO: set a variable to run with real parameters
-        self.mu = self.add_weight("mu", shape=[mu_dim],
-                                  dtype='float32',
-                                  #constraint=set_mu_sign(),
-                                  # initializer=tf.keras.initializers.Constant(-mu),
-                                  trainable=True)
-
-    def call(self, adstock):
-        # We suppose that the weights mu are all non-positive.
-        # TODO: remove basis from make_transition_matrix
-        Q = make_non_exposed_user_transtion_matrix(self.cm, self.mu, adstock)
-
-        return tf.math.maximum(Q, self.cm['basis'])
-
+        return tf.concat(weights, axis=0)
 
 # Layer for functional API
 class TransitionProbLayerBeta(tf.keras.layers.Layer):
 
-    def __init__(self, cm, mu, initializer = None):  # N_states should be passed as parameter to the layer to determine matrix dimension
+    def __init__(self, cm, initializer = None):  # N_states should be passed as parameter to the layer to determine matrix dimension
         super(TransitionProbLayerBeta, self).__init__()
         self.click_prob = None
         self.init_prob = None
@@ -268,7 +244,6 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         self.mu = None
         self.N_states = cm['N_states']
         self.cm = cm
-        #self.mu = mu
         self.initializer = initializer[0]
 
     def build(self, input_shape):
@@ -283,12 +258,12 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         # TODO: set a variable to run with real parameters
         self.mu = self.add_weight(shape=[3],
                                     dtype='float32',
-                                    initializer=tf.keras.initializers.Constant([-2.,-1.,-4.]),
+                                    initializer=self.initializer['MU'],
                                     trainable=True,
                                     name='Beta')
         self.beta = self.add_weight(shape=[beta_dim],
                                     dtype='float32',
-                                    constraint = set_beta_sign(),
+                                    constraint = set_beta_sign(N_states),
                                     initializer=self.initializer['BETA'],
                                     trainable=True,
                                     name='Beta')
@@ -312,37 +287,20 @@ class TransitionProbLayerBeta(tf.keras.layers.Layer):
         return {"Q": Q, "init_prob": init_prob, "click_prob": click_prob}
 
 
-def build_hmm_to_fit_beta(cm, mu, initializer):
+def build_hmm_to_fit_beta(cm, initializer):
     # Generate functional model
 
     adstock_input = tf.keras.layers.Input(shape=(cm['N_camp'], cm['execution_duration'] + 1,))
-    parameters = TransitionProbLayerBeta(cm, mu, initializer)(adstock_input)
+    parameters = TransitionProbLayerBeta(cm, initializer)(adstock_input)
     out = tfp.layers.DistributionLambda(
         lambda t: tfd.HiddenMarkovModel(
-            initial_distribution=generate_hmm_distributions(initial_state_prob_vector=t['init_prob'], click_prob=t['click_prob'],
+            initial_distribution=generate_hmm_distributions(cm, initial_state_prob_vector=t['init_prob'], click_prob=t['click_prob'],
                                                             transition_matrix=t['Q'])['initial_distribution'],
             transition_distribution=tfd.Categorical(probs=t['Q']),
-            observation_distribution=generate_hmm_distributions(initial_state_prob_vector=t['init_prob'], click_prob=t['click_prob'],
+            observation_distribution=generate_hmm_distributions(cm, initial_state_prob_vector=t['init_prob'], click_prob=t['click_prob'],
                                                                 transition_matrix=t['Q'])['observation_distribution'],
             time_varying_transition_distribution=True,
             num_steps=cm['execution_duration'] + 1))(parameters)
-
-    return tf.keras.Model(inputs=adstock_input, outputs=out)
-
-
-def build_hmm_to_fit_mu(cm, states_observable):
-    # Generate functional model
-
-    adstock_input = tf.keras.layers.Input(shape=(cm['N_camp'], cm['execution_duration'] + 1,))
-    Q = TransitionProbLayerMu(cm, cm['N_states'])(adstock_input)
-    out = tfp.layers.DistributionLambda(
-        lambda t: tfd.HiddenMarkovModel(
-            initial_distribution=tfd.Categorical(probs=[1,0,0]),
-            transition_distribution=tfd.Categorical(probs=t),
-            observation_distribution=tfd.Categorical(
-                probs = np.array([[1.0,0.0],[1.0,0.0],[0.0,1.0]], dtype=np.float32).reshape(1,3,2) ),
-            time_varying_transition_distribution=True,
-            num_steps=cm['execution_duration'] + 1))(Q)
 
     return tf.keras.Model(inputs=adstock_input, outputs=out)
 

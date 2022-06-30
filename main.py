@@ -9,7 +9,7 @@ from src.plot_and_print_info.plots_and_print_info import *
 advertising_campaign = SimulationClass(ANALYSIS_MODE)
 advertising_campaign.simulate()
 
-adstock = compute_adstock(observation=advertising_campaign.results["user_expositions"])
+adstock = compute_adstock(cm, observation=advertising_campaign.results["user_expositions"])
 
 model = build_hmm_to_fit( states_observable=STATES_ARE_OBSERVABLE )
 

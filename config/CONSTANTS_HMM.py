@@ -1,7 +1,7 @@
 # ENVIRONMENT PARAMETERS
 time = execution_duration = 30  # Days
 lw = 2  # line width, for plots
-N_users = 20000  # Set users' pool dimension. Notice that the total number of users is dynamical
+N_users = 5000  # Set users' pool dimension. Notice that the total number of users is dynamical
 
 ########################################################################################################################
 ########################################################################################################################
@@ -20,7 +20,7 @@ LEARNING_RATE = 1e-3
 initial_learning_rate = 1e-2  # Only if LR_EXPONENTIAL_DECAY = True in config/execution_parameters
 decay_steps = 10000  # Only if LR_ExponentialDecay = 1 in config/execution_parameters
 decay_rate = 0.9  # Only if LR_ExponentialDecay = 1 in config/execution_parameters
-EPOCHS = 1000
+EPOCHS = 200
 BATCH_SIZE = 500
 basis = 1e-4
 
@@ -29,11 +29,17 @@ basis = 1e-4
 N_camp = 2
 
 discount_factor = 0.8
-p_exp = [0.5, 0.5, 0.4] # Probability of exposition to each campaign
-N_exp_1 = 8000
-N_exp_2 = 6000
+p_exp = [0.7, 0.7] # Probability of exposition to each campaign
+DEFAULT_IMPRESSIONS = {
+    'N_exp_1': 2000,
+    'N_exp_2': 2000,
+}
 #N_exp_3 = 1200
 
 # Parameters to define Users behaviour. See Abishek paper
-MU = [ -2.7419195, -7.4647417, -1.1010361, -5.92728  ]
-BETA = [0.7, 0.25, -0.3, 0.15, 0.4, 0.1, -0.4, 0.8]
+MU = [ -2.75, -1.1, -5.9 ]
+BETA = [0.7, -0.3, 0.15,
+        0.4, -0.4, 0.8]
+#BETA = [0.7, -0.3, 0.15, 0.4, -0.4, 0.8]
+INITIAL_STATE_PROB = [0.8] # Probability of entering the HMM in the first N_states-2 states. Must be same length of N_states
+CLICK_PROB = [0.2]
